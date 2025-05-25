@@ -20,6 +20,22 @@ public class Engine
     private readonly Dictionary<string, TileSet> _loadedTileSets = new();
     private readonly Dictionary<int, Tile> _tileIdMap = new();
 
+    private TextureData _gameOverTexture;
+    private int _gameOverTextureId;
+    private bool _isGameOver = false;
+
+    private int _treatsCollected;
+    private const int _treatsToWin = 5;
+
+    private int _livesLetf;
+    private const int _livesMax = 3;
+    private bool _gameWon = false;
+    private int _gameWonTextureId;
+    private TextureData _gameWonTexture;
+
+    private BitmapFontRenderer _counterRenderer;
+    private SpriteSheet _counterSprite;
+
     private Level _currentLevel = new();
     private PlayerObject? _player;
     private PlayerObject? _playerCat;
@@ -37,6 +53,9 @@ public class Engine
         _input.OnMouseClick += (_, coords) => AddBomb(coords.x, coords.y);
     }
     public GameRenderer GetRenderer() => _renderer;
+
+    private const int ScreenWidth = 640;
+    private const int ScreenHeight = 400;
 
     public void SetupWorld()
     {
@@ -57,8 +76,6 @@ public class Engine
                 CreateNoWindow = true
             }
         };
-
-
 
         var levelContent = File.ReadAllText(Path.Combine("Assets", "terrain.tmj"));
         var level = JsonSerializer.Deserialize<Level>(levelContent);
@@ -100,6 +117,13 @@ public class Engine
 
         _currentLevel = level;
 
+        _gameOverTextureId = _renderer.LoadTexture(Path.Combine("Assets", "game_over.png"), out _gameOverTexture);
+        _gameWonTextureId = _renderer.LoadTexture(Path.Combine("Assets", "game_won.png"), out _gameWonTexture);
+
+        _treatsCollected = 0;
+        _livesLetf = _livesMax;
+        _counterSprite = SpriteSheet.Load(_renderer, "font.json", "Assets");
+        _counterRenderer = new BitmapFontRenderer(_renderer, _counterSprite);
         _scriptEngine.LoadAll(Path.Combine("Assets", "Scripts"));
     }
 
@@ -125,12 +149,10 @@ public class Engine
         double p2Down = _input.IsKeySPressed() ? 1.0 : 0.0;
         double p2Left = _input.IsKeyAPressed() ? 1.0 : 0.0;
         double p2Right = _input.IsKeyDPressed() ? 1.0 : 0.0;
-        // bool p2IsAttacking = _input.IsKeyAPressed() && (up + down + left + right <= 1);
-        // bool p2AddBomb = _input.IsKeyBPressed();
 
 
-        _player.UpdatePosition(p1Up, p1Down, p1Left, p1Right, 48, 48, msSinceLastFrame);
-        _playerCat.UpdatePosition(p2Up, p2Down, p2Left, p2Right, 48, 48, msSinceLastFrame);
+        _player.UpdatePosition(p1Up, p1Down, p1Left, p1Right, 960, 640, msSinceLastFrame);
+        _playerCat.UpdatePosition(p2Up, p2Down, p2Left, p2Right, 960, 640, msSinceLastFrame);
         if (p1IsAttacking)
         {
             _player.Attack();
@@ -149,12 +171,25 @@ public class Engine
         _renderer.SetDrawColor(0, 0, 0, 255);
         _renderer.ClearScreen();
 
+        var p1Position = _player!.Position;
+        var p2Position = _playerCat!.Position;
 
-        var playerPosition = _player!.Position;
-        _renderer.CameraLookAt(playerPosition.X, playerPosition.Y);
+        var x = (int)(p1Position.X + p2Position.X) / 2;
+        var y = (int)(p1Position.Y + p2Position.Y) / 2;
+        _renderer.CameraLookAt(x, y);
 
         RenderTerrain();
         RenderAllObjects();
+
+        if (_isGameOver)
+            RenderGameOver();
+        else if (_gameWon)
+            RenderGameWon();
+        else
+        {
+            RenderTreatCounter();
+            RenderLivesCounter();
+        }   
 
         _renderer.PresentFrame();
     }
@@ -181,21 +216,32 @@ public class Engine
 
 
             if (tempGameObject.Type.Equals("bomb") && CheckPlayerCollision(_player!, tempGameObject))
+            {
+                _livesLetf--;
+                
+            }
+            if ( _livesLetf == 0)
+            {
                 _player.GameOver();
+                _isGameOver = true;
+            }
 
 
             if (tempGameObject.Type.Equals("treat"))
-            {
-                TreatObject treat = (TreatObject)tempGameObject;
-                if (treat.CheckCollision((_playerCat.Position.X, _playerCat.Position.Y)))
                 {
-                    _audioProcess.Start();
+                    TreatObject treat = (TreatObject)tempGameObject;
+                    if (treat.CheckCollision((_playerCat.Position.X, _playerCat.Position.Y)))
+                    {
+                        _audioProcess.Start();
+                        _treatsCollected++;
+                        if (_treatsCollected == _treatsToWin)
+                            _gameWon = true;
 
-                    _gameObjects.Remove(treat.Id);
-                    continue;
+                        _gameObjects.Remove(treat.Id);
+                        continue;
 
+                    }
                 }
-            }
         }
 
         _player?.Render(_renderer);
@@ -213,8 +259,11 @@ public class Engine
         return false;
     }
 
+
     public void RenderTerrain()
     {
+        float scaleX = 2.0f;
+        float scaleY = 2.0f;  
         foreach (var currentLayer in _currentLevel.Layers)
         {
             for (int i = 0; i < _currentLevel.Width; ++i)
@@ -238,12 +287,82 @@ public class Engine
                     var tileWidth = currentTile.ImageWidth ?? 0;
                     var tileHeight = currentTile.ImageHeight ?? 0;
 
-                    var sourceRect = new Rectangle<int>(0, 0, tileWidth, tileHeight);
-                    var destRect = new Rectangle<int>(i * tileWidth, j * tileHeight, tileWidth, tileHeight);
+                    var sourceRect = new Rectangle<int>(
+                    0, 0,
+                    (int)(currentTile.ImageWidth ?? _currentLevel.TileWidth),
+                    (int)(currentTile.ImageHeight ?? _currentLevel.TileHeight)
+                );
+
+                    var destRect = new Rectangle<int>(
+                        (int)(i * _currentLevel.TileWidth * scaleX),
+                        (int)(j * _currentLevel.TileHeight * scaleY),
+                        (int)(_currentLevel.TileWidth * scaleX),
+                        (int)(_currentLevel.TileHeight * scaleY)
+                    );
                     _renderer.RenderTexture(currentTile.TextureId, sourceRect, destRect);
                 }
             }
         }
+    }
+
+    public void RenderGameOver()
+    {
+        _renderer.CameraLookAt(0, 0);
+
+        _renderer.SetDrawColor(0, 0, 0, 180);
+        _renderer.ClearScreen();
+
+        float scale = Math.Min(960f / _gameOverTexture.Width, 640f / _gameOverTexture.Height);
+
+        int scaledWidth = (int)(_gameOverTexture.Width * scale);
+        int scaledHeight = (int)(_gameOverTexture.Height * scale);
+
+        int x = (960 - scaledWidth) / 2;
+        int y = (640 - scaledHeight) / 2;
+        var destRect = new Rectangle<int>(x, y, scaledWidth, scaledHeight);
+        _renderer.RenderTexture(_gameOverTextureId, new Rectangle<int>(0, 0, _gameOverTexture.Width, _gameOverTexture.Height), destRect);
+    }
+    public void RenderGameWon()
+    {
+         _renderer.CameraLookAt(0, 0);
+
+            _renderer.SetDrawColor(0, 0, 0, 180);
+            _renderer.ClearScreen();
+
+            float scale = Math.Min(960f / _gameWonTexture.Width, 640f / _gameWonTexture.Height);
+
+            int scaledWidth = (int)(_gameWonTexture.Width * scale);
+            int scaledHeight = (int)(_gameWonTexture.Height * scale);
+
+            int x = (960 - scaledWidth) / 2;
+            int y = (640 - scaledHeight) / 2;
+            var destRect = new Rectangle<int>(x, y, scaledWidth, scaledHeight);
+            _renderer.RenderTexture(_gameWonTextureId, new Rectangle<int>(0, 0, _gameWonTexture.Width, _gameWonTexture.Height), destRect);
+    }
+
+    private void RenderTreatCounter()
+    {
+        var originalCamera = _renderer.GetCameraPosition();
+        var x = originalCamera.X;
+        var y = originalCamera.Y;
+        _renderer.SetDrawColor(50, 50, 50, 200);
+        _renderer.RenderRectangle(new Rectangle<int>(x + 20 - 240, y + 10 - 160, 320, 60));
+        string counterText = $"Treats: {_treatsCollected}/{_treatsToWin}";
+        _counterRenderer.DrawText(counterText, x + 35 - 240, y + 25 - 160, 3.0f);
+
+    }
+    private void RenderLivesCounter()
+    {
+        var originalCamera = _renderer.GetCameraPosition();
+        var x = originalCamera.X;
+        var y = originalCamera.Y;
+        _renderer.SetDrawColor(50, 50, 50, 200);
+        _renderer.RenderRectangle(new Rectangle<int>(x + 600 - 240, y+ 10 - 160, 300, 60));
+        string counterText = $"Lives: {_livesLetf}/{_livesMax}";
+         _counterRenderer.DrawText(counterText, x + 615 - 240, y + 25 - 160, 3.0f);
+
+        _renderer.CameraLookAt(_player!.Position.X, _player!.Position.Y);
+
     }
 
     public IEnumerable<RenderableGameObject> GetRenderables()
@@ -282,5 +401,7 @@ public class Engine
         TreatObject treat = new(spriteSheet, (worldCoords.X, worldCoords.Y));
         _gameObjects.Add(treat.Id, treat);
     }
+
+
 
 }

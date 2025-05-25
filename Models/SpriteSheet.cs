@@ -42,6 +42,8 @@ public class SpriteSheet
     public bool AnimationFinished { get; private set; }
 
     private int _textureId = -1;
+
+    public int TextureId => _textureId;
     private DateTimeOffset _animationStart = DateTimeOffset.MinValue;
 
     public static SpriteSheet Load(GameRenderer renderer, string fileName, string directory)

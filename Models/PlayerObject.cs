@@ -146,6 +146,15 @@ public class PlayerObject : RenderableGameObject
             SetState(newState, newDirection);
         }
 
+
+        if (x > width)
+            x = width;
+        if (x < 0)
+            x = 0;    
+        if (y > height)
+            y = height;
+        if (y < 0)
+            y = 0;    
         Position = (x, y);
     }
 }
